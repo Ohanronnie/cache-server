@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
-    net::{TcpListener, TcpStream},
+    env,
+    net::TcpListener,
     sync::{Arc, Mutex},
     thread,
 };
@@ -29,17 +30,30 @@ use server::handle_server_connection;
  but if its SET, we need the value right? yeah.
 */
 fn main() -> std::io::Result<()> {
-    let addr = "127.0.0.1:2222";
+    let host = env::var("CACHE_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port = env::var("CACHE_PORT").unwrap_or_else(|_| "2222".to_string());
+    let addr = format!("{host}:{port}");
 
     let store: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
-    let auth_store: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
-    let listener = TcpListener::bind(addr)?;
+    let auth_store: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+
+    let username = env::var("CACHE_USERNAME").unwrap_or_else(|_| "admin".to_string());
+    let password = env::var("CACHE_PASSWORD").unwrap_or_else(|_| "root".to_string());
+    auth_store.lock().unwrap().insert(username, password);
+
+    let listener = TcpListener::bind(&addr)?;
     println!("listening on {addr}");
     for stream in listener.incoming() {
         let mut stream = stream?;
-        handle_server_connection(&mut stream, &store)?;
-    }
+        let store = Arc::clone(&store);
+        let auth_store = Arc::clone(&auth_store);
 
+        thread::spawn(move || {
+            if let Err(error) = handle_server_connection(&mut stream, &store, &auth_store) {
+                eprintln!("connection error: {error}");
+            }
+        });
+    }
     Ok(())
 }
 // 3$SET$4$NAME$6$RONNIE$
